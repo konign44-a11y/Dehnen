@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Dehnen</title>
+  <meta name="theme-color" content="#0f1115">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Dehnen">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ===== Training ===== -->
+  <main id="view-home" class="view active">
+    <header class="top">
+      <h1>Mobility</h1>
+      <p id="streak" class="muted"></p>
+    </header>
+
+    <div class="start-wrap">
+      <button id="btn-start" class="start-btn" aria-label="Session starten">
+        <span class="start-label">START</span>
+        <span class="start-sub" id="start-sub"></span>
+      </button>
+    </div>
+
+    <h2 class="section-title">Heutige Session</h2>
+    <ol id="exercise-list" class="ex-list"></ol>
+  </main>
+
+  <!-- ===== Verlauf ===== -->
+  <main id="view-history" class="view">
+    <header class="top">
+      <h1>Verlauf</h1>
+    </header>
+    <div class="seg">
+      <button data-offset="-1">Letzter Monat</button>
+      <button data-offset="0" class="on">Dieser Monat</button>
+    </div>
+    <h2 id="cal-title" class="cal-title"></h2>
+    <div class="cal-head">
+      <span>Mo</span><span>Di</span><span>Mi</span><span>Do</span><span>Fr</span><span>Sa</span><span>So</span>
+    </div>
+    <div id="cal-grid" class="cal-grid"></div>
+    <p id="cal-summary" class="cal-summary muted"></p>
+    <div class="legend muted">
+      <span><i class="dot full"></i> komplett</span>
+      <span><i class="dot part"></i> teilweise</span>
+    </div>
+  </main>
+
+  <!-- ===== Navigation ===== -->
+  <nav class="tabbar">
+    <button data-view="home" class="on">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="4.5" r="2"/><path d="M5 9l7 2 7-2M12 11v5l-4 5M12 16l4 5"/></svg>
+      Training
+    </button>
+    <button data-view="history">
+      <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+      Verlauf
+    </button>
+  </nav>
+
+  <!-- ===== Session (Vollbild) ===== -->
+  <section id="session" class="session" hidden>
+    <div class="s-top">
+      <span id="s-count" class="muted"></span>
+      <span id="s-area" class="pill"></span>
+    </div>
+
+    <div class="s-img-wrap">
+      <img id="s-img-bg" class="bg" alt="" aria-hidden="true">
+      <img id="s-img" alt="">
+      <div id="s-prep" class="s-prep">Mach dich bereit</div>
+      <div id="side-toast" class="side-toast"><span class="arrows">⇄</span> <span id="side-text">Seite wechseln</span></div>
+    </div>
+
+    <h2 id="s-name" class="s-name"></h2>
+    <p id="s-tip" class="s-tip muted"></p>
+
+    <div class="ring-wrap" id="ring-tap">
+      <svg class="ring" viewBox="0 0 120 120">
+        <circle class="ring-bg" cx="60" cy="60" r="52"/>
+        <circle class="ring-fg" id="ring-fg" cx="60" cy="60" r="52"/>
+      </svg>
+      <div class="ring-text">
+        <span id="s-time">1:00</span>
+        <small id="s-state"></small>
+      </div>
+    </div>
+
+    <p id="s-next" class="s-next muted"></p>
+
+    <div class="controls">
+      <button id="btn-stop" class="ctl" aria-label="Beenden">
+        <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+      </button>
+      <button id="btn-pause" class="ctl big" aria-label="Pause">
+        <svg id="ico-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+        <svg id="ico-play" viewBox="0 0 24 24" hidden><path d="M8 5l11 7-11 7z"/></svg>
+      </button>
+      <button id="btn-skip" class="ctl" aria-label="Überspringen">
+        <svg viewBox="0 0 24 24"><path d="M6 5l9 7-9 7zM17 5h2v14h-2z"/></svg>
+      </button>
+    </div>
+
+    <div id="flash" class="flash"><div class="flash-check">✓</div><div id="flash-text">Weiter!</div></div>
+    <div id="pause-veil" class="pause-veil">Pausiert – tippen zum Fortsetzen</div>
+  </section>
+
+  <!-- ===== Fertig ===== -->
+  <section id="done" class="done" hidden>
+    <canvas id="confetti"></canvas>
+    <div class="done-card">
+      <div class="done-emoji">🎉</div>
+      <h2>Geschafft!</h2>
+      <p id="done-text" class="muted"></p>
+      <button id="btn-done" class="primary">Zurück</button>
+    </div>
+  </section>
+
+  <div id="burst" class="burst"></div>
+
+  <script src="exercises.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
