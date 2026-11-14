@@ -3,6 +3,8 @@
 const $ = (s) => document.querySelector(s);
 const RING = 2 * Math.PI * 52;
 const LOG_KEY = "dehnen.log.v1";
+const SOUND_KEY = "dehnen.sound";
+const APP_VERSION = 7;
 
 /* ============================================================
    Platzhalterbild, falls Screenshot fehlt
@@ -69,7 +71,23 @@ let actx = null;          // AudioContext
 const BUF = {};           // AudioBuffer pro Ton
 let htmlAudio = null;     // Fallback
 
+// Eigener Ton-An/Aus-Schalter. Bei "aus" wird gar kein Audio benutzt –
+// dann läuft z. B. Musik garantiert ungestört weiter.
+let soundOn = (() => { try { return localStorage.getItem(SOUND_KEY) !== "off"; } catch (_) { return true; } })();
+function applySoundUi() { document.body.classList.toggle("muted-app", !soundOn); }
+function toggleSound() {
+  soundOn = !soundOn;
+  try { localStorage.setItem(SOUND_KEY, soundOn ? "on" : "off"); } catch (_) {}
+  applySoundUi();
+  if (soundOn) { if (S.running) unlockAudio(); }   // Tap = erlaubt, Audio freizuschalten
+  else releaseAudio();
+  renderDiag();
+}
+// Audio-Kontext anhalten → iOS gibt die Audio-Sitzung frei, Musik darf weiterlaufen
+function releaseAudio() { try { if (actx && actx.state === "running") actx.suspend(); } catch (_) {} }
+
 function unlockAudio() {  // muss in einem Tap passieren (iOS-Regel)
+  if (!soundOn) return;
   try { if (navigator.audioSession) navigator.audioSession.type = "ambient"; } catch (_) {}
   const AC = window.AudioContext || window.webkitAudioContext;
   if (AC && !actx) {
@@ -101,6 +119,7 @@ function unlockAudio() {  // muss in einem Tap passieren (iOS-Regel)
 // Ton sofort abspielen (Web Audio: kleine, gleichbleibende Verzögerung).
 // <audio> nur, falls das Gerät gar kein Web Audio kann.
 function play(name) {
+  if (!soundOn) return;
   if (actx && actx.state !== "running") actx.resume().catch(() => {});
   if (actx && actx.state === "running" && BUF[name]) {
     const src = actx.createBufferSource();
@@ -318,8 +337,8 @@ function showFlash(nextName) {
 function togglePause() {
   if (!S.running) return;
   S.paused = !S.paused;
-  if (S.paused) { S.remaining = Math.min(S.endTs - Date.now(), phaseLen(S.phase)); keepAwake(false); }
-  else { S.endTs = Date.now() + S.remaining; keepAwake(true); }
+  if (S.paused) { S.remaining = Math.min(S.endTs - Date.now(), phaseLen(S.phase)); keepAwake(false); releaseAudio(); }
+  else { S.endTs = Date.now() + S.remaining; keepAwake(true); unlockAudio(); }
   $("#session").classList.toggle("paused", S.paused);
   $("#ico-pause").hidden = S.paused;
   $("#ico-play").hidden = !S.paused;
@@ -336,6 +355,7 @@ function skip() {
 function endSession() {
   clearInterval(S.timer);
   cancelAnimationFrame(S.raf);
+  setTimeout(() => { if (!S.running) releaseAudio(); }, 2500); // Fertig-Ton noch ausklingen lassen
   S.running = false;
   S.paused = false;
   keepAwake(false);
@@ -355,8 +375,8 @@ function stopSession() {
 function finishSession() {
   S.completed = EXERCISES.length;
   saveSession(S.completed);
-  endSession();
   play("finish");
+  endSession();
   const mins = Math.round(totalWork() / 60);
   $("#done-text").textContent = `${EXERCISES.length} Übungen · ${mins} Minuten gedehnt`;
   $("#done").hidden = false;
@@ -426,6 +446,16 @@ function renderCalendar() {
 }
 
 /* ============================================================
+   Diagnose (klein unten im Verlauf) – hilft bei Ton-Problemen
+   ============================================================ */
+function renderDiag() {
+  const ios = (navigator.userAgent.match(/OS (\d+)_(\d+)/) || []).slice(1).join(".") || "–";
+  const as = navigator.audioSession ? navigator.audioSession.type : "nicht verfügbar";
+  const standalone = navigator.standalone || matchMedia("(display-mode: standalone)").matches;
+  $("#diag").textContent = `Version ${APP_VERSION} · iOS ${ios} · Audio-Session: ${as} · Ton ${soundOn ? "an" : "aus"} · ${standalone ? "Homebildschirm-App" : "Browser"}`;
+}
+
+/* ============================================================
    Events
    ============================================================ */
 $("#btn-start").addEventListener("click", startSession);
@@ -435,12 +465,14 @@ $("#pause-veil").addEventListener("click", togglePause);
 $("#btn-skip").addEventListener("click", skip);
 $("#btn-stop").addEventListener("click", stopSession);
 $("#btn-done").addEventListener("click", () => { $("#done").hidden = true; });
+$("#sound-home").addEventListener("click", toggleSound);
+$("#sound-session").addEventListener("click", (e) => { e.stopPropagation(); toggleSound(); });
 
 document.querySelectorAll(".tabbar button").forEach((b) => b.addEventListener("click", () => {
   document.querySelectorAll(".tabbar button").forEach((x) => x.classList.toggle("on", x === b));
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
   $(`#view-${b.dataset.view}`).classList.add("active");
-  if (b.dataset.view === "history") renderCalendar();
+  if (b.dataset.view === "history") { renderCalendar(); renderDiag(); }
 }));
 document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
   document.querySelectorAll(".seg button").forEach((x) => x.classList.toggle("on", x === b));
@@ -458,6 +490,8 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
+applySoundUi();
 renderHome();
 renderCalendar();
+renderDiag();
 if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});

@@ -17,6 +17,19 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .view.active{display:block}
 .top h1{margin:0;font-size:32px;letter-spacing:-.5px}
 .top p{margin:4px 0 0;font-size:15px}
+.top-row{display:flex;align-items:center;justify-content:space-between}
+.sound-btn{width:40px;height:40px;border-radius:50%;background:var(--card);display:flex;align-items:center;justify-content:center;flex:none;transition:transform .12s}
+.sound-btn:active{transform:scale(.9)}
+.sound-btn svg{width:22px;height:22px;fill:none;stroke:var(--text);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.sound-btn svg path:first-child{fill:var(--text)}
+.sound-btn .i-off{display:none}
+body.muted-app .sound-btn .i-on{display:none}
+body.muted-app .sound-btn .i-off{display:block}
+body.muted-app .sound-btn svg .w{stroke:#ff6b8b}
+.s-top-r{display:flex;align-items:center;gap:10px}
+.s-top-r .sound-btn{width:34px;height:34px}
+.s-top-r .sound-btn svg{width:19px;height:19px}
+.diag{text-align:center;font-size:11px;margin-top:40px;opacity:.6;-webkit-user-select:text;user-select:text}
 @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 
 /* ---------- Start-Button ---------- */

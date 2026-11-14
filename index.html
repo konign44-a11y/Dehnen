@@ -18,7 +18,7 @@
   <!-- ===== Training ===== -->
   <main id="view-home" class="view active">
     <header class="top">
-      <h1>Mobility</h1>
+      <div class="top-row"><h1>Mobility</h1><button id="sound-home" class="sound-btn" aria-label="Ton an/aus"><svg class="i-on" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="w" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg><svg class="i-off" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="w" d="M17 9l5 6M22 9l-5 6"/></svg></button></div>
       <p id="streak" class="muted"></p>
     </header>
 
@@ -52,6 +52,7 @@
       <span><i class="dot full"></i> komplett</span>
       <span><i class="dot part"></i> teilweise</span>
     </div>
+    <p id="diag" class="diag muted"></p>
   </main>
 
   <!-- ===== Navigation ===== -->
@@ -70,7 +71,7 @@
   <section id="session" class="session" hidden>
     <div class="s-top">
       <span id="s-count" class="muted"></span>
-      <span id="s-area" class="pill"></span>
+      <span class="s-top-r"><span id="s-area" class="pill"></span><button id="sound-session" class="sound-btn" aria-label="Ton an/aus"><svg class="i-on" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="w" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg><svg class="i-off" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="w" d="M17 9l5 6M22 9l-5 6"/></svg></button></span>
     </div>
 
     <div class="s-img-wrap">
