@@ -23,8 +23,8 @@ function setImg(el, ex) {
 
 /* ============================================================
    Sound
-   Hauptweg: Web Audio – Töne werden im Voraus auf die Millisekunde
-   genau eingeplant (Countdown 3-2-1 kommt dadurch gleichmäßig).
+   Hauptweg: Web Audio. Jeder Piep wird genau in dem Moment gespielt,
+   in dem die Zahl im Ring umspringt – Ton und Anzeige bleiben synchron.
    navigator.audioSession "playback" sorgt auf dem iPhone (iOS 17+)
    dafür, dass es auch bei eingeschaltetem Lautlos-Schalter klingt.
    Fallback ohne Web Audio: erzeugte WAV-Dateien über <audio>.
@@ -60,14 +60,13 @@ const PCM = {
   // Seitenwechsel: tiefes "Ding-Dong" zweimal – klingt bewusst anders als Tick und Gong
   side:   makePcm([
     { f: 784, at: 0,    dur: 0.25, decay: 9, vol: 0.5 }, { f: 523, at: 0.16, dur: 0.35, decay: 8, vol: 0.5 },
-    { f: 784, at: 0.48, dur: 0.25, decay: 9, vol: 0.5 }, { f: 523, at: 0.64, dur: 0.5,  decay: 6, vol: 0.5 },
+    { f: 784, at: 0.40, dur: 0.22, decay: 9, vol: 0.5 }, { f: 523, at: 0.54, dur: 0.4,  decay: 7, vol: 0.5 },
   ]),
   finish: makePcm([523, 659, 784, 1047].map((f, i) => ({ f, at: i * 0.13, dur: 0.9, decay: 4, vol: 0.4 }))),
 };
 
 let actx = null;          // AudioContext
 const BUF = {};           // AudioBuffer pro Ton
-let scheduled = [];       // vorgeplante Töne (zum Abbrechen bei Pause/Überspringen)
 let htmlAudio = null;     // Fallback
 
 function unlockAudio() {  // muss in einem Tap passieren (iOS-Regel)
@@ -87,7 +86,6 @@ function unlockAudio() {  // muss in einem Tap passieren (iOS-Regel)
     if (actx.state !== "running") actx.resume().catch(() => {});
     // kurzer stummer Puffer schaltet Audio auf iOS sicher frei
     const s = actx.createBufferSource(); s.buffer = actx.createBuffer(1, 1, RATE); s.connect(actx.destination); s.start(0);
-    return;
   }
   if (!htmlAudio) {
     htmlAudio = {};
@@ -99,30 +97,21 @@ function unlockAudio() {  // muss in einem Tap passieren (iOS-Regel)
   }
 }
 
-// Ton abspielen – sofort oder in `delay` Sekunden (nur mit Web Audio vorplanbar)
-function playAt(name, delay = 0) {
-  if (actx && BUF[name]) {
+// Ton sofort abspielen. Web Audio hat eine kleine, gleichbleibende Verzögerung;
+// <audio> ist nur Reserve, falls iOS den Audio-Kontext gerade pausiert hat.
+function play(name) {
+  if (actx && actx.state !== "running") actx.resume().catch(() => {});
+  if (actx && actx.state === "running" && BUF[name]) {
     const src = actx.createBufferSource();
     src.buffer = BUF[name];
     src.connect(actx.destination);
-    src.start(actx.currentTime + Math.max(0, delay));
-    if (delay > 0) {
-      scheduled.push(src);
-      src.onended = () => { scheduled = scheduled.filter((x) => x !== src); };
-    }
+    src.start(0);
     return;
   }
-  if (htmlAudio && delay === 0) {
+  if (htmlAudio) {
     const a = htmlAudio[name];
     try { a.currentTime = 0; a.play().catch(() => {}); } catch (_) {}
   }
-}
-const play = (name) => playAt(name, 0);
-const canSchedule = () => !!(actx && actx.state === "running");
-
-function cancelScheduled() {
-  for (const s of scheduled) { try { s.onended = null; s.stop(); } catch (_) {} }
-  scheduled = [];
 }
 
 /* ============================================================
@@ -219,7 +208,9 @@ function startSession() {
     Object.assign(S, { idx: 0, half: 1, paused: false, running: true, completed: 0 });
     $("#session").hidden = false;
     enterPhase(SETTINGS.prep > 0 ? "prep" : "work", true);
-    S.timer = setInterval(tick, 50);
+    S.timer = setInterval(tick, 100);          // Reserve, falls der Bildschirmtakt pausiert
+    const loop = () => { if (!S.running) return; tick(); S.raf = requestAnimationFrame(loop); };
+    S.raf = requestAnimationFrame(loop);
   }, 380);
 }
 
@@ -253,20 +244,6 @@ function enterPhase(phase, animate, holdMs = 0) {
   if (phase === "work") play("go");
   if (phase === "switch") play("side");
   render();
-  scheduleTicks();
-}
-
-// Plant die 3-2-1-Piepser der aktuellen Phase exakt ein (Wechselpause: nur 2-1)
-function scheduleTicks() {
-  cancelScheduled();
-  if (!canSchedule() || !S.running || S.paused) return;
-  const maxTick = S.phase === "switch" ? 2 : 3;
-  const now = Date.now(), len = phaseLen(S.phase);
-  for (let k = 1; k <= maxTick; k++) {
-    if (k * 1000 >= len) continue;               // kein Piepser direkt zu Phasenbeginn
-    const delay = (S.endTs - k * 1000 - now) / 1000;
-    if (delay > 0.02) playAt("tick", delay);
-  }
 }
 
 function nextExercise(withFlash) {
@@ -303,23 +280,30 @@ function tick() {
     if (!advance()) return;
     S.endTs -= overshoot;
     S.remaining = Math.min(S.endTs - Date.now(), phaseLen(S.phase));
-    scheduleTicks();
   }
   render();
 }
 
+// Welche Sekunden piepen?  Wechselzeit (prep): jede Sekunde 5-4-3-2-1,
+// Ende einer Übung / Seitenwechsel-Pause: 3-2-1
+function beepsAt(sec) {
+  if (S.phase === "prep") return sec >= 1 && sec <= SETTINGS.prep;
+  return sec >= 1 && sec <= 3 && sec * 1000 < phaseLen(S.phase);
+}
+
 function render() {
   const len = phaseLen(S.phase);
-  const frac = Math.max(0, Math.min(1, S.remaining / len));
-  $("#ring-fg").style.strokeDashoffset = RING * (1 - frac);
-  const sec = Math.ceil(S.remaining / 1000);
-  $("#s-time").textContent = fmt(sec);
+  const real = S.endTs - Date.now();             // echte Restzeit (während des grünen Übergangs > len)
+  const shown = Math.max(0, Math.min(real, len));
+  $("#ring-fg").style.strokeDashoffset = RING * (1 - shown / len);
+  $("#s-time").textContent = fmt(Math.ceil(shown / 1000));
+  const sec = Math.ceil(real / 1000);
   if (sec !== S.lastSec) {
     S.lastSec = sec;
-    const wrap = $("#ring-tap");
-    if (sec <= (S.phase === "switch" ? 2 : 3) && sec > 0 && S.running && !S.paused) {
+    if (S.running && !S.paused && beepsAt(sec)) {
+      play("tick");
+      const wrap = $("#ring-tap");
       wrap.classList.remove("last3"); void wrap.offsetWidth; wrap.classList.add("last3");
-      if (!canSchedule()) play("tick");   // mit Web Audio sind die Piepser schon exakt eingeplant
     }
   }
 }
@@ -333,8 +317,8 @@ function showFlash(nextName) {
 function togglePause() {
   if (!S.running) return;
   S.paused = !S.paused;
-  if (S.paused) { S.remaining = Math.min(S.endTs - Date.now(), phaseLen(S.phase)); keepAwake(false); cancelScheduled(); }
-  else { S.endTs = Date.now() + S.remaining; keepAwake(true); scheduleTicks(); }
+  if (S.paused) { S.remaining = Math.min(S.endTs - Date.now(), phaseLen(S.phase)); keepAwake(false); }
+  else { S.endTs = Date.now() + S.remaining; keepAwake(true); }
   $("#session").classList.toggle("paused", S.paused);
   $("#ico-pause").hidden = S.paused;
   $("#ico-play").hidden = !S.paused;
@@ -350,7 +334,7 @@ function skip() {
 
 function endSession() {
   clearInterval(S.timer);
-  cancelScheduled();
+  cancelAnimationFrame(S.raf);
   S.running = false;
   S.paused = false;
   keepAwake(false);
@@ -465,9 +449,9 @@ document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("clic
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     if (S.running && !S.paused) {
-      keepAwake(true); tick();
-      if (actx && actx.state !== "running") actx.resume().then(scheduleTicks).catch(() => {});
-      else scheduleTicks();
+      keepAwake(true);
+      if (actx && actx.state !== "running") actx.resume().catch(() => {});
+      tick();
     }
     renderHome();
   }
