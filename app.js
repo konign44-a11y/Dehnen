@@ -22,54 +22,107 @@ function setImg(el, ex) {
 }
 
 /* ============================================================
-   Sound – erzeugte WAV-Töne über <audio>.
-   (HTML-Audio läuft auf dem iPhone auch, wenn der Lautlos-
-   Schalter an ist; Web-Audio wäre dann stumm.)
+   Sound
+   Hauptweg: Web Audio – Töne werden im Voraus auf die Millisekunde
+   genau eingeplant (Countdown 3-2-1 kommt dadurch gleichmäßig).
+   navigator.audioSession "playback" sorgt auf dem iPhone (iOS 17+)
+   dafür, dass es auch bei eingeschaltetem Lautlos-Schalter klingt.
+   Fallback ohne Web Audio: erzeugte WAV-Dateien über <audio>.
    ============================================================ */
-function makeWav(notes) {
-  const rate = 22050;
+const RATE = 22050;
+function makePcm(notes) {
   const total = notes.reduce((s, n) => Math.max(s, n.at + n.dur), 0);
-  const len = Math.ceil(total * rate);
+  const len = Math.ceil(total * RATE);
   const data = new Float32Array(len);
   for (const n of notes) {
-    const start = Math.floor(n.at * rate), l = Math.floor(n.dur * rate);
+    const start = Math.floor(n.at * RATE), l = Math.floor(n.dur * RATE);
     for (let i = 0; i < l && start + i < len; i++) {
-      const t = i / rate;
-      const env = Math.min(1, i / (rate * 0.005)) * Math.exp(-t * (n.decay || 6));
+      const t = i / RATE;
+      const env = Math.min(1, i / (RATE * 0.005)) * Math.exp(-t * (n.decay || 6));
       data[start + i] += Math.sin(2 * Math.PI * n.f * t) * env * (n.vol || 0.5);
     }
   }
-  const buf = new ArrayBuffer(44 + len * 2), v = new DataView(buf);
+  return data;
+}
+function pcmToWavUrl(data) {
+  const len = data.length, buf = new ArrayBuffer(44 + len * 2), v = new DataView(buf);
   const w = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
   w(0, "RIFF"); v.setUint32(4, 36 + len * 2, true); w(8, "WAVE"); w(12, "fmt ");
   v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  v.setUint32(24, RATE, true); v.setUint32(28, RATE * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
   w(36, "data"); v.setUint32(40, len * 2, true);
   for (let i = 0; i < len; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, data[i])) * 0x7fff, true);
   return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
 }
-const SOUNDS = {
-  tick:   new Audio(makeWav([{ f: 880, at: 0, dur: 0.15, decay: 18, vol: 0.45 }])),
-  go:     new Audio(makeWav([{ f: 660, at: 0, dur: 0.4, decay: 7 }, { f: 990, at: 0.14, dur: 0.6, decay: 5 }])),
+const PCM = {
+  tick:   makePcm([{ f: 880, at: 0, dur: 0.15, decay: 18, vol: 0.45 }]),
+  go:     makePcm([{ f: 660, at: 0, dur: 0.4, decay: 7 }, { f: 990, at: 0.14, dur: 0.6, decay: 5 }]),
   // Seitenwechsel: tiefes "Ding-Dong" zweimal – klingt bewusst anders als Tick und Gong
-  side:   new Audio(makeWav([
+  side:   makePcm([
     { f: 784, at: 0,    dur: 0.25, decay: 9, vol: 0.5 }, { f: 523, at: 0.16, dur: 0.35, decay: 8, vol: 0.5 },
     { f: 784, at: 0.48, dur: 0.25, decay: 9, vol: 0.5 }, { f: 523, at: 0.64, dur: 0.5,  decay: 6, vol: 0.5 },
-  ])),
-  finish: new Audio(makeWav([523, 659, 784, 1047].map((f, i) => ({ f, at: i * 0.13, dur: 0.9, decay: 4, vol: 0.4 })))),
+  ]),
+  finish: makePcm([523, 659, 784, 1047].map((f, i) => ({ f, at: i * 0.13, dur: 0.9, decay: 4, vol: 0.4 }))),
 };
-let audioUnlocked = false;
-function unlockAudio() {           // muss in einem Tap passieren (iOS-Regel)
-  if (audioUnlocked) return;
-  audioUnlocked = true;
-  for (const a of Object.values(SOUNDS)) {
-    a.muted = true;
-    a.play().then(() => { a.pause(); a.currentTime = 0; a.muted = false; }).catch(() => { a.muted = false; });
+
+let actx = null;          // AudioContext
+const BUF = {};           // AudioBuffer pro Ton
+let scheduled = [];       // vorgeplante Töne (zum Abbrechen bei Pause/Überspringen)
+let htmlAudio = null;     // Fallback
+
+function unlockAudio() {  // muss in einem Tap passieren (iOS-Regel)
+  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (_) {}
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (AC && !actx) {
+    try {
+      actx = new AC();
+      for (const [name, data] of Object.entries(PCM)) {
+        const b = actx.createBuffer(1, data.length, RATE);
+        b.getChannelData(0).set(data);
+        BUF[name] = b;
+      }
+    } catch (_) { actx = null; }
+  }
+  if (actx) {
+    if (actx.state !== "running") actx.resume().catch(() => {});
+    // kurzer stummer Puffer schaltet Audio auf iOS sicher frei
+    const s = actx.createBufferSource(); s.buffer = actx.createBuffer(1, 1, RATE); s.connect(actx.destination); s.start(0);
+    return;
+  }
+  if (!htmlAudio) {
+    htmlAudio = {};
+    for (const [name, data] of Object.entries(PCM)) htmlAudio[name] = new Audio(pcmToWavUrl(data));
+    for (const a of Object.values(htmlAudio)) {
+      a.muted = true;
+      a.play().then(() => { a.pause(); a.currentTime = 0; a.muted = false; }).catch(() => { a.muted = false; });
+    }
   }
 }
-function play(name) {
-  const a = SOUNDS[name];
-  try { a.currentTime = 0; a.play().catch(() => {}); } catch (_) {}
+
+// Ton abspielen – sofort oder in `delay` Sekunden (nur mit Web Audio vorplanbar)
+function playAt(name, delay = 0) {
+  if (actx && BUF[name]) {
+    const src = actx.createBufferSource();
+    src.buffer = BUF[name];
+    src.connect(actx.destination);
+    src.start(actx.currentTime + Math.max(0, delay));
+    if (delay > 0) {
+      scheduled.push(src);
+      src.onended = () => { scheduled = scheduled.filter((x) => x !== src); };
+    }
+    return;
+  }
+  if (htmlAudio && delay === 0) {
+    const a = htmlAudio[name];
+    try { a.currentTime = 0; a.play().catch(() => {}); } catch (_) {}
+  }
+}
+const play = (name) => playAt(name, 0);
+const canSchedule = () => !!(actx && actx.state === "running");
+
+function cancelScheduled() {
+  for (const s of scheduled) { try { s.onended = null; s.stop(); } catch (_) {} }
+  scheduled = [];
 }
 
 /* ============================================================
@@ -166,7 +219,7 @@ function startSession() {
     Object.assign(S, { idx: 0, half: 1, paused: false, running: true, completed: 0 });
     $("#session").hidden = false;
     enterPhase(SETTINGS.prep > 0 ? "prep" : "work", true);
-    S.timer = setInterval(tick, 100);
+    S.timer = setInterval(tick, 50);
   }, 380);
 }
 
@@ -200,6 +253,20 @@ function enterPhase(phase, animate, holdMs = 0) {
   if (phase === "work") play("go");
   if (phase === "switch") play("side");
   render();
+  scheduleTicks();
+}
+
+// Plant die 3-2-1-Piepser der aktuellen Phase exakt ein (Wechselpause: nur 2-1)
+function scheduleTicks() {
+  cancelScheduled();
+  if (!canSchedule() || !S.running || S.paused) return;
+  const maxTick = S.phase === "switch" ? 2 : 3;
+  const now = Date.now(), len = phaseLen(S.phase);
+  for (let k = 1; k <= maxTick; k++) {
+    if (k * 1000 >= len) continue;               // kein Piepser direkt zu Phasenbeginn
+    const delay = (S.endTs - k * 1000 - now) / 1000;
+    if (delay > 0.02) playAt("tick", delay);
+  }
 }
 
 function nextExercise(withFlash) {
@@ -236,6 +303,7 @@ function tick() {
     if (!advance()) return;
     S.endTs -= overshoot;
     S.remaining = Math.min(S.endTs - Date.now(), phaseLen(S.phase));
+    scheduleTicks();
   }
   render();
 }
@@ -251,7 +319,7 @@ function render() {
     const wrap = $("#ring-tap");
     if (sec <= (S.phase === "switch" ? 2 : 3) && sec > 0 && S.running && !S.paused) {
       wrap.classList.remove("last3"); void wrap.offsetWidth; wrap.classList.add("last3");
-      play("tick");
+      if (!canSchedule()) play("tick");   // mit Web Audio sind die Piepser schon exakt eingeplant
     }
   }
 }
@@ -265,8 +333,8 @@ function showFlash(nextName) {
 function togglePause() {
   if (!S.running) return;
   S.paused = !S.paused;
-  if (S.paused) { S.remaining = Math.min(S.endTs - Date.now(), phaseLen(S.phase)); keepAwake(false); }
-  else { S.endTs = Date.now() + S.remaining; keepAwake(true); }
+  if (S.paused) { S.remaining = Math.min(S.endTs - Date.now(), phaseLen(S.phase)); keepAwake(false); cancelScheduled(); }
+  else { S.endTs = Date.now() + S.remaining; keepAwake(true); scheduleTicks(); }
   $("#session").classList.toggle("paused", S.paused);
   $("#ico-pause").hidden = S.paused;
   $("#ico-play").hidden = !S.paused;
@@ -282,6 +350,7 @@ function skip() {
 
 function endSession() {
   clearInterval(S.timer);
+  cancelScheduled();
   S.running = false;
   S.paused = false;
   keepAwake(false);
@@ -395,7 +464,11 @@ document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("clic
 }));
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    if (S.running && !S.paused) { keepAwake(true); tick(); }
+    if (S.running && !S.paused) {
+      keepAwake(true); tick();
+      if (actx && actx.state !== "running") actx.resume().then(scheduleTicks).catch(() => {});
+      else scheduleTicks();
+    }
     renderHome();
   }
 });
