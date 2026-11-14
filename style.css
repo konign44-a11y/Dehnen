@@ -94,9 +94,10 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .side-toast{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:10px;
   background:rgba(58,160,255,.88);color:#fff;font-size:26px;font-weight:800;opacity:0;pointer-events:none}
 .side-toast .arrows{font-size:34px;display:inline-block}
-.side-toast.go{animation:sideToast 2.6s ease forwards}
-.side-toast.go .arrows{animation:swing .6s ease-in-out 3}
-@keyframes sideToast{0%{opacity:0;transform:scale(.9)}10%{opacity:1;transform:none}75%{opacity:1}100%{opacity:0}}
+.session.switching .side-toast{opacity:1;animation:sideIn .35s ease}
+.session.switching .side-toast .arrows{animation:swing .7s ease-in-out infinite}
+.session.switching .ring-fg{stroke:var(--accent2)}
+@keyframes sideIn{from{opacity:0;transform:scale(.92)}}
 @keyframes swing{50%{transform:scaleX(-1)}}
 .s-name{margin:14px 0 4px;font-size:23px;text-align:center}
 .s-tip{margin:0;text-align:center;font-size:14.5px;line-height:1.35;max-width:420px;min-height:2.7em}

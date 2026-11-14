@@ -116,7 +116,7 @@ function renderHome() {
     setImg(li.querySelector("img"), ex);
     list.appendChild(li);
   });
-  const mins = Math.round((totalWork() + EXERCISES.length * SETTINGS.prep) / 60);
+  const mins = Math.round(totalTime() / 60);
   $("#start-sub").textContent = `${EXERCISES.length} Übungen · ~${mins} min`;
 
   // Streak: aufeinanderfolgende Tage (heute oder gestern beginnend)
@@ -133,13 +133,23 @@ function renderHome() {
 
 /* ============================================================
    Session-Ablauf
-   phase: "prep" (Bereit machen) oder "work" (Übung läuft)
+   Phasen:  "prep"   – Mach dich bereit (vor jeder Übung)
+            "work"   – Übung läuft (bei einseitigen: eine Hälfte)
+            "switch" – Seitenwechsel-Pause zwischen den Hälften
    ============================================================ */
-const S = { idx: 0, phase: "prep", endTs: 0, remaining: 0, paused: false, running: false, timer: 0, lastSec: -1, completed: 0 };
+const S = { idx: 0, phase: "prep", half: 1, endTs: 0, remaining: 0, paused: false, running: false, timer: 0, lastSec: -1, completed: 0 };
+const FLASH_MS = 1300; // so lange ist der grüne "Weiter"-Bildschirm zu sehen – zählt nicht zur Wechselzeit
 // Eigene Dauer pro Übung möglich (duration: 90), sonst Standard aus SETTINGS
 const exDur = (ex) => ex.duration || SETTINGS.duration;
+const sideLbl = (ex) => (ex.sides === true ? "Seite" : ex.sides);
 const totalWork = () => EXERCISES.reduce((s, e) => s + exDur(e), 0);
-const phaseLen = (p) => (p === "prep" ? SETTINGS.prep : exDur(EXERCISES[S.idx])) * 1000;
+const totalTime = () => totalWork() + EXERCISES.length * SETTINGS.prep + EXERCISES.filter((e) => e.sides).length * SETTINGS.switch;
+function phaseLen(p) {
+  const ex = EXERCISES[S.idx];
+  if (p === "prep") return SETTINGS.prep * 1000;
+  if (p === "switch") return SETTINGS.switch * 1000;
+  return (ex.sides ? exDur(ex) / 2 : exDur(ex)) * 1000;
+}
 
 function startSession() {
   unlockAudio();
@@ -153,29 +163,32 @@ function startSession() {
 
   setTimeout(() => {
     btn.classList.remove("launch");
-    Object.assign(S, { idx: 0, paused: false, running: true, completed: 0 });
+    Object.assign(S, { idx: 0, half: 1, paused: false, running: true, completed: 0 });
     $("#session").hidden = false;
     enterPhase(SETTINGS.prep > 0 ? "prep" : "work", true);
     S.timer = setInterval(tick, 100);
   }, 380);
 }
 
-function enterPhase(phase, animate) {
+// holdMs: Countdown startet erst danach (z. B. während der grüne Übergang läuft)
+function enterPhase(phase, animate, holdMs = 0) {
   S.phase = phase;
   S.remaining = phaseLen(phase);
-  S.endTs = Date.now() + S.remaining;
+  S.endTs = Date.now() + holdMs + S.remaining;
   S.lastSec = -1;
-  S.switched = false;
   const ex = EXERCISES[S.idx];
   const sess = $("#session");
   sess.classList.toggle("prep", phase === "prep");
+  sess.classList.toggle("switching", phase === "switch");
   $("#s-count").textContent = `Übung ${S.idx + 1} / ${EXERCISES.length}`;
   $("#s-area").textContent = ex.area;
   $("#s-name").textContent = ex.name;
   $("#s-tip").textContent = ex.tip || "";
-  $("#s-state").textContent = phase === "prep" ? "gleich geht's los" : ex.sides ? `${ex.sides === true ? "Seite" : ex.sides} 1` : "halten & atmen";
-  $("#side-text").textContent = `${ex.sides === true ? "Seite" : ex.sides} wechseln`;
-  $("#side-toast").classList.remove("go");
+  $("#side-text").textContent = `${ex.sides ? sideLbl(ex) : "Seite"} wechseln`;
+  $("#s-state").textContent =
+    phase === "prep" ? "gleich geht's los"
+    : phase === "switch" ? "wechseln"
+    : ex.sides ? `${sideLbl(ex)} ${S.half}` : "halten & atmen";
   const nx = EXERCISES[S.idx + 1];
   $("#s-next").textContent = nx ? `Danach: ${nx.name}` : "Letzte Übung 💪";
   if (animate) {
@@ -185,35 +198,44 @@ function enterPhase(phase, animate) {
     wrap.classList.remove("swap"); void wrap.offsetWidth; wrap.classList.add("swap");
   }
   if (phase === "work") play("go");
+  if (phase === "switch") play("side");
   render();
+}
+
+function nextExercise(withFlash) {
+  if (S.idx + 1 >= EXERCISES.length) { finishSession(); return false; }
+  S.idx++;
+  S.half = 1;
+  if (withFlash) showFlash(EXERCISES[S.idx].name);
+  if (SETTINGS.prep > 0) enterPhase("prep", true, withFlash ? FLASH_MS : 0);
+  else enterPhase("work", true);
+  return true;
+}
+
+// Eine Phase ist abgelaufen → nächste Phase bestimmen
+function advance() {
+  const ex = EXERCISES[S.idx];
+  if (S.phase === "prep") return enterPhase("work", false), true;
+  if (S.phase === "switch") { S.half = 2; enterPhase("work", false); return true; }
+  // work vorbei
+  if (ex.sides && S.half === 1) {
+    if (SETTINGS.switch > 0) enterPhase("switch", false);
+    else { S.half = 2; play("side"); enterPhase("work", false); }
+    return true;
+  }
+  S.completed = S.idx + 1;
+  return nextExercise(true);
 }
 
 function tick() {
   if (!S.running || S.paused) return;
-  S.remaining = S.endTs - Date.now();
+  S.remaining = Math.min(S.endTs - Date.now(), phaseLen(S.phase));
   // Falls die App im Hintergrund war, ggf. mehrere Phasen nachholen
   while (S.remaining <= 0 && S.running) {
     const overshoot = -S.remaining;
-    if (S.phase === "prep") {
-      enterPhase("work", false);
-    } else {
-      S.completed = S.idx + 1;
-      if (S.idx + 1 >= EXERCISES.length) return finishSession();
-      S.idx++;
-      showFlash(EXERCISES[S.idx].name);
-      enterPhase(SETTINGS.prep > 0 ? "prep" : "work", true);
-    }
+    if (!advance()) return;
     S.endTs -= overshoot;
-    S.remaining = S.endTs - Date.now();
-  }
-  // Halbzeit bei einseitigen Übungen → Seitenwechsel
-  if (S.phase === "work" && EXERCISES[S.idx].sides && !S.switched && S.remaining <= phaseLen("work") / 2) {
-    S.switched = true;
-    play("side");
-    const lbl = EXERCISES[S.idx].sides === true ? "Seite" : EXERCISES[S.idx].sides;
-    $("#s-state").textContent = `${lbl} 2`;
-    const t = $("#side-toast");
-    t.classList.remove("go"); void t.offsetWidth; t.classList.add("go");
+    S.remaining = Math.min(S.endTs - Date.now(), phaseLen(S.phase));
   }
   render();
 }
@@ -227,7 +249,7 @@ function render() {
   if (sec !== S.lastSec) {
     S.lastSec = sec;
     const wrap = $("#ring-tap");
-    if (sec <= 3 && sec > 0 && S.running && !S.paused) {
+    if (sec <= (S.phase === "switch" ? 2 : 3) && sec > 0 && S.running && !S.paused) {
       wrap.classList.remove("last3"); void wrap.offsetWidth; wrap.classList.add("last3");
       play("tick");
     }
@@ -243,7 +265,7 @@ function showFlash(nextName) {
 function togglePause() {
   if (!S.running) return;
   S.paused = !S.paused;
-  if (S.paused) { S.remaining = S.endTs - Date.now(); keepAwake(false); }
+  if (S.paused) { S.remaining = Math.min(S.endTs - Date.now(), phaseLen(S.phase)); keepAwake(false); }
   else { S.endTs = Date.now() + S.remaining; keepAwake(true); }
   $("#session").classList.toggle("paused", S.paused);
   $("#ico-pause").hidden = S.paused;
@@ -253,11 +275,9 @@ function togglePause() {
 function skip() {
   if (!S.running) return;
   if (S.paused) togglePause();
-  if (S.phase === "prep") { enterPhase("work", false); return; }
-  if (S.idx + 1 >= EXERCISES.length) return finishSession();
-  S.idx++;
-  showFlash(EXERCISES[S.idx].name);
-  enterPhase(SETTINGS.prep > 0 ? "prep" : "work", true);
+  if (S.phase === "prep") return enterPhase("work", false);
+  if (S.phase === "switch") { S.half = 2; return enterPhase("work", false); }
+  nextExercise(true);
 }
 
 function endSession() {
@@ -266,7 +286,7 @@ function endSession() {
   S.paused = false;
   keepAwake(false);
   const sess = $("#session");
-  sess.classList.remove("paused", "prep");
+  sess.classList.remove("paused", "prep", "switching");
   $("#ico-pause").hidden = false; $("#ico-play").hidden = true;
   sess.hidden = true;
 }

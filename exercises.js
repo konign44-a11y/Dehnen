@@ -2,13 +2,14 @@
 //  DEINE ÜBUNGEN – Reihenfolge = Reihenfolge in der Session.
 //
 //  duration: Sekunden (ohne Angabe = SETTINGS.duration)
-//  sides:    true        → zur Halbzeit "Seite wechseln" + Ton
-//            "Richtung"  → zur Halbzeit "Richtung wechseln" + Ton
+//  sides:    true        → zur Halbzeit Pause + "Seite wechseln" + Ton
+//            "Richtung"  → zur Halbzeit Pause + "Richtung wechseln" + Ton
 // ============================================================
 
 const SETTINGS = {
   duration: 60, // Standard-Sekunden pro Übung
   prep: 5,      // Sekunden "Mach dich bereit" vor jeder Übung (0 = aus)
+  switch: 4,    // Sekunden Pause beim Seiten-/Richtungswechsel (0 = aus)
 };
 
 const EXERCISES = [
