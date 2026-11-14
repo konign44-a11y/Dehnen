@@ -25,9 +25,9 @@ function setImg(el, ex) {
    Sound
    Hauptweg: Web Audio. Jeder Piep wird genau in dem Moment gespielt,
    in dem die Zahl im Ring umspringt – Ton und Anzeige bleiben synchron.
-   navigator.audioSession "playback" sorgt auf dem iPhone (iOS 17+)
-   dafür, dass es auch bei eingeschaltetem Lautlos-Schalter klingt.
-   Fallback ohne Web Audio: erzeugte WAV-Dateien über <audio>.
+   navigator.audioSession "ambient": Töne halten sich an den Lautlos-
+   Schalter des iPhones und mischen sich mit Musik (die läuft weiter).
+   Fallback nur, wenn es gar kein Web Audio gibt: WAV über <audio>.
    ============================================================ */
 const RATE = 22050;
 function makePcm(notes) {
@@ -70,7 +70,7 @@ const BUF = {};           // AudioBuffer pro Ton
 let htmlAudio = null;     // Fallback
 
 function unlockAudio() {  // muss in einem Tap passieren (iOS-Regel)
-  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (_) {}
+  try { if (navigator.audioSession) navigator.audioSession.type = "ambient"; } catch (_) {}
   const AC = window.AudioContext || window.webkitAudioContext;
   if (AC && !actx) {
     try {
@@ -86,6 +86,7 @@ function unlockAudio() {  // muss in einem Tap passieren (iOS-Regel)
     if (actx.state !== "running") actx.resume().catch(() => {});
     // kurzer stummer Puffer schaltet Audio auf iOS sicher frei
     const s = actx.createBufferSource(); s.buffer = actx.createBuffer(1, 1, RATE); s.connect(actx.destination); s.start(0);
+    return;
   }
   if (!htmlAudio) {
     htmlAudio = {};
@@ -97,8 +98,8 @@ function unlockAudio() {  // muss in einem Tap passieren (iOS-Regel)
   }
 }
 
-// Ton sofort abspielen. Web Audio hat eine kleine, gleichbleibende Verzögerung;
-// <audio> ist nur Reserve, falls iOS den Audio-Kontext gerade pausiert hat.
+// Ton sofort abspielen (Web Audio: kleine, gleichbleibende Verzögerung).
+// <audio> nur, falls das Gerät gar kein Web Audio kann.
 function play(name) {
   if (actx && actx.state !== "running") actx.resume().catch(() => {});
   if (actx && actx.state === "running" && BUF[name]) {
